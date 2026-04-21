@@ -5,6 +5,7 @@
 A production-grade, hybrid Codemod that automates the migration from Wagmi v1 to v2, including the complex TanStack Query v5 `useEffect` callback refactoring.
 
 ![Codemod Demo](./demo.gif)
+**[Watch the full 40-second demo on YouTube](https://youtu.be/6LeSqNmRGNI)**
 
 ## Quickstart
 

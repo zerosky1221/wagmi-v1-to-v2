@@ -1,0 +1,23 @@
+schema_version: "1.0"
+name: "@zerosky1221/wagmi-v1-to-v2"
+version: "0.1.8"
+description: "Production-grade migration recipe for wagmi v1 → v2. Deterministic hook renames, WagmiProvider swap, connector class→function conversion, connector import consolidation. AI-augmented step for structural edge cases (configureChains, usePrepare+useContractWrite pairs, useNetwork merge, mutation argument relocation, query option wrapping, watch-prop refactor)."
+author: "tataannan"
+license: "MIT"
+workflow: "workflow.yaml"
+
+targets:
+  languages: ["tsx", "ts", "jsx", "js"]
+
+keywords:
+  - wagmi
+  - web3
+  - react
+  - ethereum
+  - migration
+  - viem
+  - tanstack-query
+
+registry:
+  access: "public"
+  visibility: "public"

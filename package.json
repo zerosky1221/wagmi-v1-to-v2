@@ -1,0 +1,11 @@
+{
+  "name": "wagmi-v1-to-v2",
+  "version": "0.1.7",
+  "type": "module",
+  "description": "Codemod package — wagmi v1 → v2 migration recipe",
+  "main": "scripts/codemod.js",
+  "scripts": {
+    "validate": "npx codemod workflow validate -w workflow.yaml",
+    "publish:registry": "npx codemod publish"
+  }
+}

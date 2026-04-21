@@ -1,0 +1,160 @@
+version: "1"
+
+params:
+  schema:
+    run_ai_step:
+      name: "Run AI edge-case step"
+      description: "Enable AI-powered fixups for structural patterns codemod intentionally leaves untouched to avoid false positives."
+      type: string
+      default: "false"
+
+nodes:
+  - id: wagmi-v1-to-v2-tsx
+    name: Deterministic wagmi v1 → v2 transforms (TSX)
+    type: automatic
+    steps:
+      - name: "Rename hooks, connectors, WagmiProvider, connector imports (tsx)"
+        js-ast-grep:
+          js_file: scripts/codemod.js
+          language: "tsx"
+
+  - id: wagmi-v1-to-v2-ts
+    name: Deterministic wagmi v1 → v2 transforms (TS)
+    type: automatic
+    steps:
+      - name: "Rename hooks, connectors, WagmiProvider, connector imports (ts)"
+        js-ast-grep:
+          js_file: scripts/codemod.js
+          language: "typescript"
+
+  - id: wagmi-v1-to-v2-ai
+    name: AI edge-case fixups
+    type: automatic
+    steps:
+      - name: "Handle structural patterns left by deterministic step"
+        if: params.run_ai_step == "true"
+        ai:
+          prompt: |
+            You are finalizing a wagmi v1 → v2 migration in a React/TypeScript codebase.
+            The deterministic codemod has already renamed hooks, connector classes, and the
+            WagmiConfig → WagmiProvider root. It intentionally left the structurally risky
+            patterns below for you. Refactor ONLY what is listed. Preserve business logic,
+            types, and comments. Do NOT re-rename anything the codemod already handled.
+
+            SCOPE DISCIPLINE (critical to avoid false positives):
+            - Only transform identifiers imported from `wagmi`, `@wagmi/core`, or
+              `@wagmi/connectors`. Leave identifiers imported from `viem`, `@tanstack/react-query`,
+              or third-party libraries untouched.
+            - Do NOT remove or modify options passed to non-wagmi calls. In particular,
+              `publicClient.*`, `walletClient.*`, and any other viem-prefixed call expressions
+              keep ALL their existing arguments. Example:
+                publicClient.getBlockNumber({ cacheTime: 0 })   ← LEAVE AS-IS
+              (The TanStack-Query option rename from `cacheTime`→`gcTime` applies to wagmi READ
+              hook options ONLY, not to viem client methods.)
+            - Do NOT introduce imports for hooks the file did not already use, unless a rule
+              below explicitly requires it (e.g. rule 8 adds `useBlockNumber`; rule 7 adds
+              `useEffect` from react).
+
+            OUTPUT DISCIPLINE:
+            - Return the refactored file VERBATIM. No "// Rule N:" comments. No "// Wagmi v2:"
+              explanatory comments. No "// Refactor:" markers. If a rule requires an edit, just
+              make the edit — do not narrate it in the source.
+            - Preserve every pre-existing comment from the input file exactly as written.
+            - Preserve the file's trailing newline convention (if the input ends with `\n`, the
+              output must too).
+
+            1) configureChains:
+               Replace any `configureChains(chains, providers)` + `createConfig({ publicClient, chains })`
+               pair with the v2 form:
+                 createConfig({
+                   chains: [...],
+                   transports: { [chain.id]: http(rpcUrl?) },
+                 })
+               Drop `publicProvider`, `alchemyProvider`, `infuraProvider`, `jsonRpcProvider` imports;
+               use `http` from `viem` (or omit URL for public).
+
+            2) usePrepareContractWrite + useContractWrite pair:
+               Collapse into `useSimulateContract` + `useWriteContract`:
+                 const { data } = useSimulateContract({ ...args })
+                 const { writeContract } = useWriteContract()
+                 writeContract(data!.request)
+               Preserve original args/chain/enabled gating.
+
+            3) usePrepareSendTransaction + useSendTransaction:
+               Collapse into `useEstimateGas` + `useSendTransaction` using the same pattern.
+
+            4) useNetwork:
+               `useNetwork().chain` → `useAccount().chain`
+               `useNetwork().chains` → `useConfig().chains`
+
+            5) Mutation args-at-setup → args-at-call:
+               `useSignMessage({ message })` → `const { signMessage } = useSignMessage(); signMessage({ message })`
+               Same for `useSendTransaction`, `useWriteContract`, `useSignTypedData`.
+               For any `onSuccess` / `onError` / `onSettled` on these mutations, see rule 7
+               (mutation branch): move them to the call-site option bag, not the hook setup.
+
+            6) Query option relocation:
+               For read hooks (useReadContract, useReadContracts, useBalance, useBlockNumber, etc.),
+               move these top-level props INTO a nested `query: { ... }` object:
+                 enabled, staleTime, gcTime, refetchInterval, refetchOnMount,
+                 refetchOnWindowFocus, refetchOnReconnect, retry, retryDelay,
+                 select, placeholderData, initialData, structuralSharing, notifyOnChangeProps
+               For `onSuccess` / `onError` / `onSettled`, see rule 7 — they are NOT moved into
+               `query: {}`, they are removed and converted to `useEffect`.
+
+            7) Callback Transition (CRITICAL for TanStack Query v5):
+               `onSuccess`, `onError`, `onSettled` were REMOVED from query options in v5.
+               Apply to every read hook (useReadContract, useReadContracts, useBalance,
+               useBlockNumber, useWaitForTransactionReceipt, useEnsName, useEnsAddress, etc.):
+                 - IDENTIFY these three callbacks in the hook's arg object.
+                 - DO NOT wrap them in a `query: {}` object — they will error at compile time.
+                 - REMOVE the callbacks from the hook arguments entirely.
+                 - IMPLEMENT equivalent behaviour via `useEffect` watching the relevant status
+                   flag (`isSuccess`, `isError`, `isFetched`) and/or `data`/`error`.
+                 - ENSURE every external identifier referenced inside the callback body is
+                   added to the `useEffect` dependency array (data, error, and any closed-over
+                   props/state/functions).
+                 - Import `useEffect` from `react` if not already imported.
+               Example (read hook):
+                 // v1
+                 const { data } = useReadContract({
+                   address, abi, functionName,
+                   onSuccess(value) { console.log('read', value); },
+                   onError(err) { notify(err); },
+                 });
+                 // v2
+                 const { data, error, isSuccess, isError } = useReadContract({
+                   address, abi, functionName,
+                 });
+                 useEffect(() => { if (isSuccess && data !== undefined) console.log('read', data); },
+                          [isSuccess, data]);
+                 useEffect(() => { if (isError && error) notify(error); },
+                          [isError, error, notify]);
+               For MUTATIONS (useWriteContract, useSendTransaction, useSignMessage,
+               useSignTypedData), `onSuccess`/`onError`/`onSettled` ARE still supported —
+               pass them via the call-site option bag, NOT at hook-setup:
+                 const { writeContract } = useWriteContract();
+                 writeContract(request, { onSuccess, onError, onSettled });
+
+            8) watch: true:
+               Remove `watch: true` from useBalance/useReadContract/etc. Replace with:
+                 const { data: blockNumber } = useBlockNumber({ watch: true })
+                 const { data, refetch } = useBalance({ ... })
+                 useEffect(() => { refetch() }, [blockNumber, refetch])
+               Only useBlock and useBlockNumber keep `watch`.
+
+            9) WagmiProvider + QueryClientProvider nesting:
+               If WagmiProvider is now present without a QueryClientProvider from
+               `@tanstack/react-query`, add it INSIDE WagmiProvider with a module-level
+               `const queryClient = new QueryClient()`.
+
+            10) Return shape:
+               `result.data?.hash` on useSendTransaction/useWriteContract becomes `result.data`
+               (the hash itself). Only refactor when the access is unambiguous.
+
+            11) `token` param on useBalance / useToken:
+               Replace with `useReadContract(s)` against the ERC-20 ABI. Import `erc20Abi`
+               from `viem`. `formatUnits`/`parseUnits` also from `viem`.
+
+            Do not introduce new dependencies beyond `viem` and `@tanstack/react-query`, which
+            are already required by wagmi v2.

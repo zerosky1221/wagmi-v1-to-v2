@@ -25,7 +25,7 @@ Tested extensively on `scaffold-eth-2`:
 
   - **17/17** core contract components migrated perfectly.
   - **0** False Positives.
-  - See the full [Case Study](https://www.google.com/search?q=./CASE_STUDY.md) for benchmark details.
+  - See the full [Case Study](https://github.com/zerosky1221/wagmi-v1-to-v2/blob/main/CASE_STUDY.md) for benchmark details.
 
 <!-- end list -->
 
